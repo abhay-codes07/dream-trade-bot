@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "DreamTrade Auto-Executor",
+  "version": "1.0",
+  "permissions": ["scripting", "storage"],
+  "host_permissions": ["https://*.tradingview.com/*"],
+  "content_scripts": [{
+    "matches": ["https://www.tradingview.com/chart/*"],
+    "js": ["content.js"]
+  }]
+}
