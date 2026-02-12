@@ -2,14 +2,32 @@
 <html>
 <head>
     <style>
-        body { width: 200px; font-family: sans-serif; padding: 10px; }
-        .status { color: green; font-weight: bold; }
-        .header { font-size: 14px; margin-bottom: 10px; border-bottom: 1px solid #ccc; }
+        body { width: 250px; font-family: 'Segoe UI', sans-serif; padding: 15px; background: #131722; color: white; }
+        .balance { font-size: 24px; color: #22ab94; margin-bottom: 10px; }
+        .log-item { border-bottom: 1px solid #363c4e; padding: 5px 0; font-size: 11px; }
+        .buy { color: #22ab94; } .sell { color: #f23645; }
     </style>
 </head>
 <body>
-    <div class="header">DreamTrade Bot</div>
-    <p>Status: <span class="status">Connected</span></p>
-    <p><small>Make sure your Node.js server is running on port 3000.</small></p>
+    <div style="font-size: 12px; color: #d1d4dc;">Virtual Balance</div>
+    <div id="balance" class="balance">$0.00</div>
+    <div style="font-size: 12px; margin-bottom: 5px;">Recent Trades:</div>
+    <div id="history"></div>
+
+    <script>
+        fetch('http://localhost:3000/history')
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('balance').innerText = `$${data.balance.toFixed(2)}`;
+                const hist = document.getElementById('history');
+                data.history.reverse().slice(0, 5).forEach(item => {
+                    hist.innerHTML += `<div class="log-item">
+                        <span class="${item.type.toLowerCase()}">${item.type}</span> 
+                        ${item.symbol} @ $${item.price || item.entryPrice} 
+                        <span style="float:right">${item.time}</span>
+                    </div>`;
+                });
+            });
+    </script>
 </body>
 </html>

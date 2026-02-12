@@ -1,25 +1,25 @@
 const express = require('express');
 const cors = require('cors');
-const { placeOrder, monitorExit } = require('./execution');
+const { placeOrder, monitorExit, getAccount } = require('./execution');
 const app = express();
-
 app.use(cors());
 app.use(express.json());
 
-app.post('/trade-signal', async (req, res) => {
-    const { symbol } = req.body;
-    console.log(`Execution signal for: ${symbol}`);
-    
-    // 1. Buy immediately
-    const order = await placeOrder(symbol, 'buy');
-    
-    // 2. Start the automated "Best Point to Sell" logic
-    if(order) {
-        monitorExit(symbol);
-        res.json({ status: "Success", message: "Order placed and monitoring exit." });
+app.post('/trade-signal', (req, res) => {
+    const { symbol, price, rsi } = req.body;
+
+    // Strategy: Only Buy if RSI < 30 (Stock is oversold/cheap)
+    if (rsi < 30) {
+        placeOrder(symbol, 'buy', price);
+        res.json({ status: "Bought", message: `RSI is ${rsi}. Buying the dip!` });
     } else {
-        res.status(500).json({ status: "Error" });
+        res.json({ status: "Ignored", message: `RSI is ${rsi}. Not cheap enough to buy.` });
     }
 });
 
-app.listen(3000, () => console.log('Senior Engineer Server running on http://localhost:3000'));
+// New endpoint for your Extension UI to show history
+app.get('/history', (req, res) => {
+    res.json(getAccount());
+});
+
+app.listen(3000, () => console.log('Simulator Server running on port 3000'));

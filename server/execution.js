@@ -1,58 +1,56 @@
-const axios = require('axios');
-require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
 
-const api = axios.create({
-    baseURL: process.env.ALPACA_URL,
-    headers: {
-        'APCA-API-KEY-ID': process.env.ALPACA_API_KEY,
-        'APCA-API-SECRET-KEY': process.env.ALPACA_SECRET_KEY
-    }
-});
+// Local database for your virtual money
+const DB_PATH = path.join(__dirname, 'portfolio.json');
 
-async function placeOrder(symbol, side) {
-    try {
-        const response = await api.post('/v2/orders', {
-            symbol: symbol,
-            qty: 1, // Start with 1 share for testing
-            side: side,
-            type: 'market',
-            time_in_force: 'day'
-        });
-        console.log(`Order placed: ${side} ${symbol}`);
-        return response.data;
-    } catch (error) {
-        console.error("Order Error:", error.response ? error.response.data : error.message);
-    }
+if (!fs.existsSync(DB_PATH)) {
+    fs.writeFileSync(DB_PATH, JSON.stringify({ balance: 10000, positions: [], history: [] }));
 }
 
-// The "Smart Exit" Loop
-// It checks the price every 5 seconds. If price drops 2% from the peak, it sells.
-async function monitorExit(symbol) {
-    console.log(`Monitoring exit for ${symbol}...`);
-    let peakPrice = 0;
+function getAccount() {
+    return JSON.parse(fs.readFileSync(DB_PATH));
+}
 
-    const interval = setInterval(async () => {
-        try {
-            // 1. Get current price
-            const resp = await api.get(`/v2/last/stocks/${symbol}`);
-            const currentPrice = resp.data.last.price;
+function saveAccount(data) {
+    fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
+}
 
-            if (currentPrice > peakPrice) peakPrice = currentPrice;
+async function placeOrder(symbol, side, price) {
+    let account = getAccount();
+    price = parseFloat(price);
 
-            // 2. Logic: If price drops 2% from the highest point it reached
-            const dropThreshold = peakPrice * 0.98; 
-
-            console.log(`${symbol} | Current: ${currentPrice} | Peak: ${peakPrice} | Sell at: ${dropThreshold}`);
-
-            if (currentPrice <= dropThreshold) {
-                console.log("STOP LOSS/TRAILING HIT! Selling...");
-                await placeOrder(symbol, 'sell');
-                clearInterval(interval);
-            }
-        } catch (e) {
-            console.log("Monitoring error", e.message);
+    if (side === 'buy') {
+        if (account.balance < price) return console.log("Insufficient Virtual Funds!");
+        
+        const newPosition = { symbol, entryPrice: price, qty: 1, time: new Date().toLocaleTimeString() };
+        account.balance -= price;
+        account.positions.push(newPosition);
+        account.history.push({ type: 'BUY', ...newPosition });
+        
+        console.log(`✅ VIRTUAL BUY: 1 share of ${symbol} at $${price}`);
+    } else {
+        const posIndex = account.positions.findIndex(p => p.symbol === symbol);
+        if (posIndex > -1) {
+            const pos = account.positions[posIndex];
+            const profit = price - pos.entryPrice;
+            account.balance += price;
+            account.positions.splice(posIndex, 1);
+            account.history.push({ type: 'SELL', symbol, price, profit, time: new Date().toLocaleTimeString() });
+            
+            console.log(`🚀 VIRTUAL SELL: ${symbol} at $${price} | Profit: $${profit.toFixed(2)}`);
         }
-    }, 5000); 
+    }
+    saveAccount(account);
 }
 
-module.exports = { placeOrder, monitorExit };
+// "Smart Exit" logic: Sells if profit > 2% OR loss > 1%
+function monitorExit(symbol, entryPrice, currentPrice) {
+    const profitPercent = ((currentPrice - entryPrice) / entryPrice) * 100;
+    
+    if (profitPercent >= 2.0) return "SELL_PROFIT";
+    if (profitPercent <= -1.0) return "SELL_LOSS";
+    return "HOLD";
+}
+
+module.exports = { placeOrder, monitorExit, getAccount };
