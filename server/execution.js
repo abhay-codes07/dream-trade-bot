@@ -54,3 +54,35 @@ function monitorExit(symbol, entryPrice, currentPrice) {
 }
 
 module.exports = { placeOrder, monitorExit, getAccount };
+
+async function getPortfolioValue(currentMarketPrice) {
+    const account = getAccount();
+    let totalPositionValue = 0;
+    
+    account.positions.forEach(pos => {
+        totalPositionValue += currentMarketPrice; // Value if sold now
+    });
+
+    const unrealizedPnL = account.positions.reduce((acc, pos) => {
+        return acc + (currentMarketPrice - pos.entryPrice);
+    }, 0);
+
+    return {
+        balance: account.balance,
+        equity: account.balance + totalPositionValue,
+        pnl: unrealizedPnL,
+        positionCount: account.positions.length
+    };
+}
+
+// Emergency function
+async function liquidateAll(currentPrice) {
+    const account = getAccount();
+    console.log("!!! EMERGENCY LIQUIDATION TRIGGERED !!!");
+    while(account.positions.length > 0) {
+        await placeOrder(account.positions[0].symbol, 'sell', currentPrice);
+        account = getAccount(); // Refresh
+    }
+}
+
+module.exports = { placeOrder, monitorExit, getAccount, getPortfolioValue, liquidateAll };
