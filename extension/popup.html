@@ -2,32 +2,107 @@
 <html>
 <head>
     <style>
-        body { width: 250px; font-family: 'Segoe UI', sans-serif; padding: 15px; background: #131722; color: white; }
-        .balance { font-size: 24px; color: #22ab94; margin-bottom: 10px; }
-        .log-item { border-bottom: 1px solid #363c4e; padding: 5px 0; font-size: 11px; }
-        .buy { color: #22ab94; } .sell { color: #f23645; }
+        body { 
+            width: 300px; 
+            font-family: 'Segoe UI', Roboto, Helvetica, sans-serif; 
+            padding: 0; 
+            margin: 0; 
+            background: #131722; 
+            color: #d1d4dc; 
+        }
+        .header { 
+            background: #1e222d; 
+            padding: 15px; 
+            border-bottom: 1px solid #363c4e; 
+            display: flex; 
+            justify-content: space-between;
+            align-items: center;
+        }
+        .balance-container { 
+            padding: 20px 15px; 
+            text-align: center;
+        }
+        .balance-label { font-size: 11px; color: #787b86; letter-spacing: 1px; }
+        .balance-value { font-size: 32px; font-weight: bold; color: #22ab94; margin-top: 5px; }
+        
+        .history-container { padding: 10px 15px; max-height: 200px; overflow-y: auto; }
+        .history-title { font-size: 10px; font-weight: bold; color: #5d606b; margin-bottom: 10px; text-transform: uppercase; }
+        
+        .trade-card { 
+            background: #1e222d; 
+            padding: 10px; 
+            border-radius: 6px; 
+            margin-bottom: 8px; 
+            font-size: 12px;
+            display: flex;
+            justify-content: space-between;
+            border-left: 3px solid #2962ff;
+        }
+        .buy-tag { color: #22ab94; font-weight: bold; }
+        .sell-tag { color: #f23645; font-weight: bold; }
+        
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-thumb { background: #363c4e; border-radius: 10px; }
     </style>
 </head>
 <body>
-    <div style="font-size: 12px; color: #d1d4dc;">Virtual Balance</div>
-    <div id="balance" class="balance">$0.00</div>
-    <div style="font-size: 12px; margin-bottom: 5px;">Recent Trades:</div>
-    <div id="history"></div>
+    <div class="header">
+        <span style="font-weight: bold; color: #2962ff;">DREAMTRADE</span>
+        <span style="font-size: 10px; background: #2962ff; color: white; padding: 2px 6px; border-radius: 4px;">SIMULATOR</span>
+    </div>
+
+    <div class="balance-container">
+        <div class="balance-label">CURRENT VIRTUAL BALANCE</div>
+        <div id="balance" class="balance-value">$0.00</div>
+    </div>
+
+    <div class="history-container">
+        <div class="history-title">Recent Activity</div>
+        <div id="history-list">
+            <!-- Trades injected here -->
+        </div>
+    </div>
 
     <script>
-        fetch('http://localhost:3000/history')
-            .then(r => r.json())
-            .then(data => {
-                document.getElementById('balance').innerText = `$${data.balance.toFixed(2)}`;
-                const hist = document.getElementById('history');
-                data.history.reverse().slice(0, 5).forEach(item => {
-                    hist.innerHTML += `<div class="log-item">
-                        <span class="${item.type.toLowerCase()}">${item.type}</span> 
-                        ${item.symbol} @ $${item.price || item.entryPrice} 
-                        <span style="float:right">${item.time}</span>
-                    </div>`;
+        async function fetchUpdates() {
+            try {
+                const response = await fetch('http://localhost:3000/history');
+                const data = await response.json();
+                
+                // Update Balance
+                document.getElementById('balance').innerText = 
+                    `$${data.balance.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+
+                // Update History
+                const list = document.getElementById('history-list');
+                list.innerHTML = ''; // Clear old
+
+                data.history.reverse().slice(0, 5).forEach(trade => {
+                    const card = document.createElement('div');
+                    card.className = 'trade-card';
+                    card.style.borderLeftColor = trade.type === 'BUY' ? '#22ab94' : '#f23645';
+                    
+                    card.innerHTML = `
+                        <div>
+                            <span class="${trade.type === 'BUY' ? 'buy-tag' : 'sell-tag'}">${trade.type}</span>
+                            <span style="margin-left:5px; font-weight:bold;">${trade.symbol}</span>
+                        </div>
+                        <div style="text-align:right;">
+                            $${(trade.price || trade.entryPrice).toFixed(2)}<br>
+                            <span style="font-size:9px; color:#5d606b;">${trade.time}</span>
+                        </div>
+                    `;
+                    list.appendChild(card);
                 });
-            });
+            } catch (err) {
+                document.getElementById('balance').innerText = "OFFLINE";
+                document.getElementById('balance').style.color = "#f23645";
+            }
+        }
+
+        // Auto-refresh every 2 seconds
+        setInterval(fetchUpdates, 2000);
+        fetchUpdates();
     </script>
 </body>
 </html>
