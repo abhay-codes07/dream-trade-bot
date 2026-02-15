@@ -2,65 +2,40 @@
 <html>
 <head>
     <style>
-        body { 
-            width: 300px; 
-            font-family: 'Segoe UI', Roboto, Helvetica, sans-serif; 
-            padding: 0; 
-            margin: 0; 
-            background: #131722; 
-            color: #d1d4dc; 
-        }
-        .header { 
-            background: #1e222d; 
-            padding: 15px; 
-            border-bottom: 1px solid #363c4e; 
-            display: flex; 
-            justify-content: space-between;
-            align-items: center;
-        }
-        .balance-container { 
-            padding: 20px 15px; 
-            text-align: center;
-        }
-        .balance-label { font-size: 11px; color: #787b86; letter-spacing: 1px; }
+        body { width: 300px; font-family: 'Segoe UI', sans-serif; padding: 0; margin: 0; background: #131722; color: #d1d4dc; }
+        .header { background: #1e222d; padding: 15px; border-bottom: 1px solid #363c4e; display: flex; justify-content: space-between; align-items: center; }
+        .balance-container { padding: 20px 15px; text-align: center; }
         .balance-value { font-size: 32px; font-weight: bold; color: #22ab94; margin-top: 5px; }
-        
-        .history-container { padding: 10px 15px; max-height: 200px; overflow-y: auto; }
-        .history-title { font-size: 10px; font-weight: bold; color: #5d606b; margin-bottom: 10px; text-transform: uppercase; }
-        
-        .trade-card { 
-            background: #1e222d; 
-            padding: 10px; 
-            border-radius: 6px; 
-            margin-bottom: 8px; 
-            font-size: 12px;
-            display: flex;
-            justify-content: space-between;
-            border-left: 3px solid #2962ff;
-        }
-        .buy-tag { color: #22ab94; font-weight: bold; }
-        .sell-tag { color: #f23645; font-weight: bold; }
-        
-        ::-webkit-scrollbar { width: 5px; }
-        ::-webkit-scrollbar-thumb { background: #363c4e; border-radius: 10px; }
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 0 15px 15px; }
+        .stat-card { background: #1e222d; padding: 10px; border-radius: 6px; text-align: center; border: 1px solid #363c4e; }
+        .history-container { padding: 10px 15px; max-height: 200px; overflow-y: auto; border-top: 1px solid #363c4e; }
+        .trade-card { background: #1e222d; padding: 10px; border-radius: 6px; margin-bottom: 8px; font-size: 12px; display: flex; justify-content: space-between; border-left: 3px solid #2962ff; }
     </style>
 </head>
 <body>
     <div class="header">
         <span style="font-weight: bold; color: #2962ff;">DREAMTRADE</span>
-        <span style="font-size: 10px; background: #2962ff; color: white; padding: 2px 6px; border-radius: 4px;">SIMULATOR</span>
+        <span style="font-size: 10px; background: #2962ff; color: white; padding: 2px 6px; border-radius: 4px;">PRO</span>
     </div>
 
     <div class="balance-container">
-        <div class="balance-label">CURRENT VIRTUAL BALANCE</div>
+        <div style="font-size: 11px; color: #787b86;">VIRTUAL BALANCE</div>
         <div id="balance" class="balance-value">$0.00</div>
     </div>
 
-    <div class="history-container">
-        <div class="history-title">Recent Activity</div>
-        <div id="history-list">
-            <!-- Trades injected here -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div style="font-size: 9px; color: #787b86;">WIN RATE</div>
+            <div id="win-rate" style="font-weight: bold; color: white;">0%</div>
         </div>
+        <div class="stat-card">
+            <div style="font-size: 9px; color: #787b86;">TOTAL TRADES</div>
+            <div id="total-trades" style="font-weight: bold; color: white;">0</div>
+        </div>
+    </div>
+
+    <div class="history-container">
+        <div id="history-list"></div>
     </div>
 
     <script>
@@ -68,41 +43,25 @@
             try {
                 const response = await fetch('http://localhost:3000/history');
                 const data = await response.json();
-                
-                // Update Balance
-                document.getElementById('balance').innerText = 
-                    `$${data.balance.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+                document.getElementById('balance').innerText = `$${data.balance.toLocaleString()}`;
 
-                // Update History
+                const sells = data.history.filter(t => t.type === 'SELL');
+                const wins = sells.filter(t => t.profit > 0).length;
+                document.getElementById('win-rate').innerText = sells.length > 0 ? Math.round((wins/sells.length)*100) + '%' : '0%';
+                document.getElementById('total-trades').innerText = data.history.length;
+
                 const list = document.getElementById('history-list');
-                list.innerHTML = ''; // Clear old
-
+                list.innerHTML = '';
                 data.history.reverse().slice(0, 5).forEach(trade => {
                     const card = document.createElement('div');
                     card.className = 'trade-card';
                     card.style.borderLeftColor = trade.type === 'BUY' ? '#22ab94' : '#f23645';
-                    
-                    card.innerHTML = `
-                        <div>
-                            <span class="${trade.type === 'BUY' ? 'buy-tag' : 'sell-tag'}">${trade.type}</span>
-                            <span style="margin-left:5px; font-weight:bold;">${trade.symbol}</span>
-                        </div>
-                        <div style="text-align:right;">
-                            $${(trade.price || trade.entryPrice).toFixed(2)}<br>
-                            <span style="font-size:9px; color:#5d606b;">${trade.time}</span>
-                        </div>
-                    `;
+                    card.innerHTML = `<div><b>${trade.type}</b> ${trade.symbol}</div><div>$${trade.price.toFixed(2)}</div>`;
                     list.appendChild(card);
                 });
-            } catch (err) {
-                document.getElementById('balance').innerText = "OFFLINE";
-                document.getElementById('balance').style.color = "#f23645";
-            }
+            } catch (e) { console.log("Offline"); }
         }
-
-        // Auto-refresh every 2 seconds
         setInterval(fetchUpdates, 2000);
-        fetchUpdates();
     </script>
 </body>
 </html>
