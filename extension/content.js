@@ -7,6 +7,16 @@ const trendHighlighter = {
     chartEl: null
 };
 
+const rsiIndicator = {
+    enabled: false,
+    period: 14,
+    closes: [],
+    current: null,
+    canvas: null,
+    chartEl: null,
+    sampleTimer: null
+};
+
 const findChartContainer = () => {
     const directMatch = document.querySelector(
         '.chart-container, .tv-chart-view, .chart-page, .chart-markup-table, [data-name="pane"]'
@@ -26,6 +36,57 @@ const findChartContainer = () => {
         const rectB = b.getBoundingClientRect();
         return rectB.width * rectB.height - rectA.width * rectA.height;
     })[0];
+};
+
+const extractCurrentPrice = () => {
+    const selectors = [
+        '[data-name="legend-source-item"] [data-field="close"]',
+        '[data-name="legend-source-item"] [data-field="last"]',
+        '.lastContainer-3_4epN0P',
+        '.priceWrapper-3PT2D-PK',
+        '.tv-symbol-price-quote__value'
+    ];
+
+    for (const selector of selectors) {
+        const node = document.querySelector(selector);
+        if (!node) continue;
+        const raw = node.textContent || '';
+        const value = Number(raw.replace(/[^0-9.-]/g, ''));
+        if (Number.isFinite(value)) return value;
+    }
+
+    const titleMatch = document.title.match(/([0-9]+(?:[.,][0-9]+)?)/);
+    if (!titleMatch) return null;
+    const fallback = Number(titleMatch[1].replace(',', ''));
+    return Number.isFinite(fallback) ? fallback : null;
+};
+
+const calculateRSI = (closes, period = 14) => {
+    if (!Array.isArray(closes) || closes.length <= period) return null;
+
+    let gainSum = 0;
+    let lossSum = 0;
+
+    for (let i = 1; i <= period; i += 1) {
+        const change = closes[i] - closes[i - 1];
+        if (change >= 0) gainSum += change;
+        else lossSum += Math.abs(change);
+    }
+
+    let avgGain = gainSum / period;
+    let avgLoss = lossSum / period;
+
+    for (let i = period + 1; i < closes.length; i += 1) {
+        const change = closes[i] - closes[i - 1];
+        const gain = change > 0 ? change : 0;
+        const loss = change < 0 ? Math.abs(change) : 0;
+        avgGain = ((avgGain * (period - 1)) + gain) / period;
+        avgLoss = ((avgLoss * (period - 1)) + loss) / period;
+    }
+
+    if (avgLoss === 0) return 100;
+    const rs = avgGain / avgLoss;
+    return Number((100 - (100 / (1 + rs))).toFixed(2));
 };
 
 const ensureTrendCanvas = () => {
@@ -95,6 +156,134 @@ const drawTrendHighs = () => {
     });
 };
 
+const ensureRSICanvas = () => {
+    if (rsiIndicator.canvas) return rsiIndicator.canvas;
+
+    const canvas = document.createElement('canvas');
+    canvas.id = 'dt-rsi-canvas';
+    canvas.style.position = 'fixed';
+    canvas.style.top = '0';
+    canvas.style.left = '0';
+    canvas.style.width = '100vw';
+    canvas.style.height = '100vh';
+    canvas.style.pointerEvents = 'none';
+    canvas.style.zIndex = '9999997';
+    document.body.appendChild(canvas);
+
+    rsiIndicator.canvas = canvas;
+    return canvas;
+};
+
+const resizeRSICanvas = () => {
+    const canvas = ensureRSICanvas();
+    const ratio = window.devicePixelRatio || 1;
+    canvas.width = Math.floor(window.innerWidth * ratio);
+    canvas.height = Math.floor(window.innerHeight * ratio);
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+};
+
+const drawRSIOverlay = () => {
+    const canvas = ensureRSICanvas();
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+
+    if (!rsiIndicator.enabled) return;
+
+    const chartEl = rsiIndicator.chartEl || findChartContainer();
+    if (!chartEl) return;
+    rsiIndicator.chartEl = chartEl;
+
+    const values = [];
+    for (let i = rsiIndicator.period; i < rsiIndicator.closes.length; i += 1) {
+        const slice = rsiIndicator.closes.slice(0, i + 1);
+        const value = calculateRSI(slice, rsiIndicator.period);
+        if (Number.isFinite(value)) values.push(value);
+    }
+    if (values.length < 2) return;
+
+    const rect = chartEl.getBoundingClientRect();
+    const panelWidth = Math.min(320, rect.width * 0.34);
+    const panelHeight = Math.max(90, rect.height * 0.18);
+    const x = rect.right - panelWidth - 12;
+    const y = rect.bottom - panelHeight - 12;
+
+    ctx.fillStyle = 'rgba(19, 23, 34, 0.82)';
+    ctx.fillRect(x, y, panelWidth, panelHeight);
+    ctx.strokeStyle = 'rgba(54, 60, 78, 0.95)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, y, panelWidth, panelHeight);
+
+    const toY = (rsiValue) => y + ((100 - rsiValue) / 100) * panelHeight;
+    const y30 = toY(30);
+    const y70 = toY(70);
+
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = 'rgba(242, 54, 69, 0.85)';
+    ctx.beginPath();
+    ctx.moveTo(x, y30);
+    ctx.lineTo(x + panelWidth, y30);
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(34, 171, 148, 0.85)';
+    ctx.beginPath();
+    ctx.moveTo(x, y70);
+    ctx.lineTo(x + panelWidth, y70);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.strokeStyle = '#ffb74d';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+
+    for (let i = 0; i < values.length; i += 1) {
+        const pointX = x + (i / (values.length - 1)) * panelWidth;
+        const pointY = toY(values[i]);
+        if (i === 0) ctx.moveTo(pointX, pointY);
+        else ctx.lineTo(pointX, pointY);
+    }
+    ctx.stroke();
+
+    const latest = values[values.length - 1];
+    rsiIndicator.current = latest;
+
+    ctx.fillStyle = '#ffb74d';
+    ctx.font = 'bold 11px Segoe UI, sans-serif';
+    ctx.fillText(`RSI(${rsiIndicator.period}): ${latest.toFixed(2)}`, x + 8, y + 14);
+};
+
+const sampleRSIPrice = () => {
+    if (!rsiIndicator.enabled) return;
+    const price = extractCurrentPrice();
+    if (!Number.isFinite(price)) return;
+
+    const last = rsiIndicator.closes[rsiIndicator.closes.length - 1];
+    if (last === price) return;
+
+    rsiIndicator.closes.push(price);
+    if (rsiIndicator.closes.length > 250) {
+        rsiIndicator.closes.shift();
+    }
+    drawRSIOverlay();
+};
+
+const startRSITracking = () => {
+    if (rsiIndicator.sampleTimer) clearInterval(rsiIndicator.sampleTimer);
+    rsiIndicator.sampleTimer = setInterval(sampleRSIPrice, 2000);
+    sampleRSIPrice();
+};
+
+const stopRSITracking = () => {
+    if (rsiIndicator.sampleTimer) {
+        clearInterval(rsiIndicator.sampleTimer);
+        rsiIndicator.sampleTimer = null;
+    }
+};
+
 const handleChartHighClick = (event) => {
     if (!trendHighlighter.enabled || !event.altKey) return;
 
@@ -123,8 +312,13 @@ const handleChartHighClick = (event) => {
 window.addEventListener('resize', () => {
     resizeTrendCanvas();
     drawTrendHighs();
+    resizeRSICanvas();
+    drawRSIOverlay();
 });
-window.addEventListener('scroll', drawTrendHighs, true);
+window.addEventListener('scroll', () => {
+    drawTrendHighs();
+    drawRSIOverlay();
+}, true);
 document.addEventListener('click', handleChartHighClick, true);
 
 const injectPanel = () => {
@@ -159,9 +353,16 @@ const injectPanel = () => {
             <button id="dt-trend-toggle-btn" style="width:100%; background:#1e222d; color:#ffd54f; border:1px solid #ffd54f; padding:8px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:bold; margin-bottom:8px;">ENABLE (ALT+CLICK HIGHS)</button>
             <button id="dt-trend-clear-btn" style="width:100%; background:transparent; color:#d1d4dc; border:1px solid #555d70; padding:7px; border-radius:6px; font-size:10px; cursor:pointer;">CLEAR TREND LINE</button>
         </div>
+
+        <div style="margin-top:12px; border-top:1px solid #363c4e; padding-top:10px;">
+            <div style="font-size:10px; color:#787b86; margin-bottom:8px;">RSI INDICATOR</div>
+            <button id="dt-rsi-toggle-btn" style="width:100%; background:#1e222d; color:#ffb74d; border:1px solid #ffb74d; padding:8px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:bold; margin-bottom:8px;">SHOW RSI ON CHART</button>
+            <button id="dt-rsi-reset-btn" style="width:100%; background:transparent; color:#d1d4dc; border:1px solid #555d70; padding:7px; border-radius:6px; font-size:10px; cursor:pointer;">RESET RSI DATA</button>
+        </div>
     `;
     document.body.appendChild(panel);
     resizeTrendCanvas();
+    resizeRSICanvas();
 
     setInterval(() => {
         const confVal = document.getElementById('dt-conf-val');
@@ -177,7 +378,14 @@ const injectPanel = () => {
     if (buyBtn) {
         buyBtn.onclick = () => {
             const symbol = document.title.split(' ')[0];
-            chrome.runtime.sendMessage({ action: 'start_trade', symbol, price: 65000 });
+            const latestPrice = extractCurrentPrice();
+            chrome.runtime.sendMessage({
+                action: 'start_trade',
+                symbol,
+                price: Number.isFinite(latestPrice) ? latestPrice : 65000,
+                rsi: rsiIndicator.current,
+                closes: rsiIndicator.closes.slice(-100)
+            });
             alert('Buy Order Sent!');
         };
     }
@@ -208,6 +416,31 @@ const injectPanel = () => {
         trendClearBtn.onclick = () => {
             trendHighlighter.points = [];
             drawTrendHighs();
+        };
+    }
+
+    const rsiToggleBtn = document.getElementById('dt-rsi-toggle-btn');
+    if (rsiToggleBtn) {
+        rsiToggleBtn.onclick = () => {
+            rsiIndicator.enabled = !rsiIndicator.enabled;
+            rsiIndicator.chartEl = rsiIndicator.chartEl || findChartContainer();
+            rsiToggleBtn.innerText = rsiIndicator.enabled ? 'HIDE RSI ON CHART' : 'SHOW RSI ON CHART';
+
+            if (rsiIndicator.enabled) {
+                startRSITracking();
+            } else {
+                stopRSITracking();
+                drawRSIOverlay();
+            }
+        };
+    }
+
+    const rsiResetBtn = document.getElementById('dt-rsi-reset-btn');
+    if (rsiResetBtn) {
+        rsiResetBtn.onclick = () => {
+            rsiIndicator.closes = [];
+            rsiIndicator.current = null;
+            drawRSIOverlay();
         };
     }
 };
