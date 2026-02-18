@@ -61,6 +61,19 @@ const extractCurrentPrice = () => {
     return Number.isFinite(fallback) ? fallback : null;
 };
 
+const extractCurrentSymbol = () => {
+    const pathMatch = window.location.pathname.match(/\/symbols\/([^/?#]+)/i);
+    if (pathMatch && pathMatch[1]) {
+        const fromPath = pathMatch[1].toUpperCase().replace(/[^A-Z0-9:._-]/g, '');
+        if (fromPath) return fromPath;
+    }
+
+    const titleMatch = document.title.match(/^([A-Z0-9:._-]{1,20})\b/);
+    if (titleMatch && titleMatch[1]) return titleMatch[1];
+
+    return '';
+};
+
 const calculateRSI = (closes, period = 14) => {
     if (!Array.isArray(closes) || closes.length <= period) return null;
 
@@ -284,6 +297,61 @@ const stopRSITracking = () => {
     }
 };
 
+const formatNewsAge = (isoDate) => {
+    if (!isoDate) return 'now';
+    const timestamp = new Date(isoDate).getTime();
+    if (!Number.isFinite(timestamp)) return 'now';
+    const minutesAgo = Math.max(0, Math.floor((Date.now() - timestamp) / 60000));
+    if (minutesAgo < 1) return 'now';
+    if (minutesAgo < 60) return `${minutesAgo}m`;
+    return `${Math.floor(minutesAgo / 60)}h`;
+};
+
+const refreshPanelNews = async () => {
+    const listNode = document.getElementById('dt-news-list');
+    const statusNode = document.getElementById('dt-news-status');
+    if (!listNode || !statusNode) return;
+
+    try {
+        const symbol = extractCurrentSymbol();
+        const endpoint = symbol
+            ? `http://localhost:3000/market-news?symbol=${encodeURIComponent(symbol)}`
+            : 'http://localhost:3000/market-news';
+        const response = await fetch(endpoint);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const payload = await response.json();
+        const items = Array.isArray(payload.items) ? payload.items.slice(0, 4) : [];
+        listNode.innerHTML = '';
+
+        if (items.length === 0) {
+            listNode.innerHTML = '<div style="font-size:10px; color:#787b86;">No headlines available.</div>';
+        } else {
+            items.forEach((item) => {
+                const row = document.createElement('a');
+                row.href = item.url;
+                row.target = '_blank';
+                row.rel = 'noopener noreferrer';
+                row.style = 'display:block; text-decoration:none; color:#d1d4dc; font-size:10px; line-height:1.35; background:#1a1f2b; border:1px solid #363c4e; border-radius:5px; padding:6px; margin-bottom:6px;';
+                row.innerHTML = `
+                    <div style="margin-bottom:3px;">${item.title}</div>
+                    <div style="color:#787b86;">${item.source || 'Market'} - ${formatNewsAge(item.publishedAt)}</div>
+                `;
+                listNode.appendChild(row);
+            });
+        }
+
+        statusNode.innerText = payload.updatedAt
+            ? `Updated ${new Date(payload.updatedAt).toLocaleTimeString()}${symbol ? ` (${symbol})` : ''}`
+            : 'Feed live';
+    } catch (error) {
+        statusNode.innerText = 'News feed offline';
+        if (!listNode.innerHTML) {
+            listNode.innerHTML = '<div style="font-size:10px; color:#787b86;">Start local server to stream news.</div>';
+        }
+    }
+};
+
 const handleChartHighClick = (event) => {
     if (!trendHighlighter.enabled || !event.altKey) return;
 
@@ -359,10 +427,20 @@ const injectPanel = () => {
             <button id="dt-rsi-toggle-btn" style="width:100%; background:#1e222d; color:#ffb74d; border:1px solid #ffb74d; padding:8px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:bold; margin-bottom:8px;">SHOW RSI ON CHART</button>
             <button id="dt-rsi-reset-btn" style="width:100%; background:transparent; color:#d1d4dc; border:1px solid #555d70; padding:7px; border-radius:6px; font-size:10px; cursor:pointer;">RESET RSI DATA</button>
         </div>
+
+        <div style="margin-top:12px; border-top:1px solid #363c4e; padding-top:10px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <div style="font-size:10px; color:#787b86;">MARKET NEWS</div>
+                <div id="dt-news-status" style="font-size:9px; color:#787b86;">Connecting...</div>
+            </div>
+            <div id="dt-news-list"></div>
+        </div>
     `;
     document.body.appendChild(panel);
     resizeTrendCanvas();
     resizeRSICanvas();
+    refreshPanelNews();
+    setInterval(refreshPanelNews, 20000);
 
     setInterval(() => {
         const confVal = document.getElementById('dt-conf-val');
@@ -377,7 +455,7 @@ const injectPanel = () => {
     const buyBtn = document.getElementById('dt-buy-btn');
     if (buyBtn) {
         buyBtn.onclick = () => {
-            const symbol = document.title.split(' ')[0];
+            const symbol = extractCurrentSymbol() || document.title.split(' ')[0];
             const latestPrice = extractCurrentPrice();
             chrome.runtime.sendMessage({
                 action: 'start_trade',

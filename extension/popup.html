@@ -2,14 +2,24 @@
 <html>
 <head>
     <style>
-        body { width: 300px; font-family: 'Segoe UI', sans-serif; padding: 0; margin: 0; background: #131722; color: #d1d4dc; }
+        body { width: 340px; font-family: 'Segoe UI', sans-serif; padding: 0; margin: 0; background: #131722; color: #d1d4dc; }
         .header { background: #1e222d; padding: 15px; border-bottom: 1px solid #363c4e; display: flex; justify-content: space-between; align-items: center; }
         .balance-container { padding: 20px 15px; text-align: center; }
         .balance-value { font-size: 32px; font-weight: bold; color: #22ab94; margin-top: 5px; }
         .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 0 15px 15px; }
         .stat-card { background: #1e222d; padding: 10px; border-radius: 6px; text-align: center; border: 1px solid #363c4e; }
-        .history-container { padding: 10px 15px; max-height: 200px; overflow-y: auto; border-top: 1px solid #363c4e; }
+        .section-header { font-size: 10px; color: #787b86; padding: 10px 15px 6px; border-top: 1px solid #363c4e; letter-spacing: 0.6px; }
+        .history-container { padding: 10px 15px; max-height: 180px; overflow-y: auto; }
         .trade-card { background: #1e222d; padding: 10px; border-radius: 6px; margin-bottom: 8px; font-size: 12px; display: flex; justify-content: space-between; border-left: 3px solid #2962ff; }
+        .news-container { padding: 8px 15px 14px; max-height: 220px; overflow-y: auto; }
+        .news-card { display: block; text-decoration: none; color: #d1d4dc; background: #1e222d; border: 1px solid #363c4e; border-radius: 6px; padding: 9px; margin-bottom: 8px; }
+        .news-card:hover { border-color: #2962ff; }
+        .news-title { font-size: 12px; line-height: 1.3; margin-bottom: 6px; }
+        .news-meta { font-size: 10px; color: #787b86; display: flex; justify-content: space-between; gap: 6px; }
+        #news-status { font-size: 10px; color: #787b86; padding: 0 15px 8px; }
+        .news-filter { padding: 0 15px 8px; display: flex; gap: 8px; align-items: center; }
+        #news-symbol-input { flex: 1; background: #1e222d; color: #d1d4dc; border: 1px solid #363c4e; border-radius: 5px; padding: 6px 8px; font-size: 11px; }
+        #news-filter-btn { background: #2962ff; color: white; border: none; border-radius: 5px; padding: 6px 10px; font-size: 11px; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -34,14 +44,35 @@
         </div>
     </div>
 
+    <div class="section-header">RECENT TRADES</div>
     <div class="history-container">
         <div id="history-list"></div>
     </div>
 
+    <div class="section-header">LIVE MARKET NEWS</div>
+    <div class="news-filter">
+        <input id="news-symbol-input" type="text" placeholder="Ticker (e.g. TSLA)">
+        <button id="news-filter-btn">Filter</button>
+    </div>
+    <div id="news-status">Connecting to feed...</div>
+    <div class="news-container">
+        <div id="news-list"></div>
+    </div>
+
     <script>
+        const API_BASE = 'http://localhost:3000';
+        let selectedSymbol = localStorage.getItem('dtNewsSymbol') || '';
+
+        const formatNewsTime = (isoString) => {
+            if (!isoString) return 'Unknown time';
+            const parsed = new Date(isoString);
+            if (Number.isNaN(parsed.getTime())) return 'Unknown time';
+            return parsed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        };
+
         async function fetchUpdates() {
             try {
-                const response = await fetch('http://localhost:3000/history');
+                const response = await fetch(`${API_BASE}/history`);
                 const data = await response.json();
                 document.getElementById('balance').innerText = `$${data.balance.toLocaleString()}`;
 
@@ -61,7 +92,73 @@
                 });
             } catch (e) { console.log("Offline"); }
         }
+
+        async function fetchMarketNews() {
+            const newsList = document.getElementById('news-list');
+            const status = document.getElementById('news-status');
+            const symbolParam = selectedSymbol
+                ? `?symbol=${encodeURIComponent(selectedSymbol)}`
+                : '';
+
+            try {
+                const response = await fetch(`${API_BASE}/market-news${symbolParam}`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+                const data = await response.json();
+                const items = Array.isArray(data.items) ? data.items.slice(0, 8) : [];
+                newsList.innerHTML = '';
+
+                if (items.length === 0) {
+                    newsList.innerHTML = '<div style="font-size:11px;color:#787b86;">No market headlines available.</div>';
+                } else {
+                    items.forEach((item) => {
+                        const card = document.createElement('a');
+                        card.className = 'news-card';
+                        card.href = item.url;
+                        card.target = '_blank';
+                        card.rel = 'noopener noreferrer';
+                        card.innerHTML = `
+                            <div class="news-title">${item.title}</div>
+                            <div class="news-meta">
+                                <span>${item.source || 'Market News'}</span>
+                                <span>${formatNewsTime(item.publishedAt)}</span>
+                            </div>
+                        `;
+                        newsList.appendChild(card);
+                    });
+                }
+
+                const updated = data.updatedAt ? new Date(data.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : null;
+                const suffix = selectedSymbol ? ` (${selectedSymbol})` : '';
+                status.innerText = updated ? `Last refresh: ${updated}${suffix}` : `Feed connected${suffix}`;
+            } catch (error) {
+                status.innerText = 'News feed unavailable. Check if server is running.';
+                if (!newsList.innerHTML) {
+                    newsList.innerHTML = '<div style="font-size:11px;color:#787b86;">Waiting for market feed...</div>';
+                }
+            }
+        }
+
+        const symbolInput = document.getElementById('news-symbol-input');
+        const symbolBtn = document.getElementById('news-filter-btn');
+        symbolInput.value = selectedSymbol;
+
+        const applyNewsSymbolFilter = () => {
+            selectedSymbol = symbolInput.value.toUpperCase().replace(/[^A-Z0-9._:-]/g, '').slice(0, 15);
+            symbolInput.value = selectedSymbol;
+            localStorage.setItem('dtNewsSymbol', selectedSymbol);
+            fetchMarketNews();
+        };
+
+        symbolBtn.addEventListener('click', applyNewsSymbolFilter);
+        symbolInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') applyNewsSymbolFilter();
+        });
+
+        fetchUpdates();
+        fetchMarketNews();
         setInterval(fetchUpdates, 2000);
+        setInterval(fetchMarketNews, 15000);
     </script>
 </body>
 </html>
