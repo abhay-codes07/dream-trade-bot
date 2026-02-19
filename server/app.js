@@ -21,6 +21,87 @@ const buildNewsFeedUrl = (symbol) => {
     return `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`;
 };
 
+const POSITIVE_TERMS = [
+    'surge', 'rally', 'beat', 'beats', 'growth', 'record high', 'outperform', 'upgrade',
+    'bullish', 'optimism', 'strong demand', 'profit jumps', 'soars', 'recovery', 'rebound'
+];
+const NEGATIVE_TERMS = [
+    'crash', 'selloff', 'miss', 'misses', 'downgrade', 'recession', 'inflation spike',
+    'lawsuit', 'probe', 'ban', 'war', 'default', 'bankruptcy', 'plunge', 'falls', 'slump'
+];
+const RISK_TERMS = [
+    'fed', 'rate hike', 'interest rate', 'cpi', 'sec', 'regulation', 'tariff', 'sanction',
+    'conflict', 'earnings', 'guidance', 'layoffs', 'hack', 'liquidation', 'volatility'
+];
+
+const countTermHits = (text, terms) => terms.reduce((count, term) => (
+    text.includes(term) ? count + 1 : count
+), 0);
+
+const analyzeHeadline = (title) => {
+    const text = (title || '').toLowerCase();
+    const positiveHits = countTermHits(text, POSITIVE_TERMS);
+    const negativeHits = countTermHits(text, NEGATIVE_TERMS);
+    const riskHits = countTermHits(text, RISK_TERMS);
+
+    const sentimentRaw = (positiveHits * 18) - (negativeHits * 20);
+    const sentimentScore = Math.max(-100, Math.min(100, sentimentRaw));
+    const riskScore = Math.max(0, Math.min(100, (riskHits * 22) + (negativeHits * 8)));
+
+    const sentimentLabel = sentimentScore > 12
+        ? 'bullish'
+        : sentimentScore < -12
+            ? 'bearish'
+            : 'neutral';
+
+    const impactLabel = riskScore >= 65
+        ? 'high'
+        : riskScore >= 35
+            ? 'medium'
+            : 'low';
+
+    return { sentimentScore, riskScore, sentimentLabel, impactLabel };
+};
+
+const summarizeMood = (items) => {
+    if (!Array.isArray(items) || items.length === 0) {
+        return {
+            sentimentScore: 0,
+            riskScore: 0,
+            mood: 'neutral',
+            confidence: 0,
+            headlineCount: 0
+        };
+    }
+
+    const totals = items.reduce((acc, item) => {
+        acc.sentiment += Number(item.sentimentScore) || 0;
+        acc.risk += Number(item.riskScore) || 0;
+        if (item.sentimentLabel === 'bullish') acc.bullish += 1;
+        if (item.sentimentLabel === 'bearish') acc.bearish += 1;
+        return acc;
+    }, { sentiment: 0, risk: 0, bullish: 0, bearish: 0 });
+
+    const count = items.length;
+    const sentimentScore = Number((totals.sentiment / count).toFixed(1));
+    const riskScore = Number((totals.risk / count).toFixed(1));
+    const confidence = Number((Math.abs(totals.bullish - totals.bearish) / count * 100).toFixed(1));
+
+    const mood = sentimentScore > 10
+        ? 'bullish'
+        : sentimentScore < -10
+            ? 'bearish'
+            : 'neutral';
+
+    return {
+        sentimentScore,
+        riskScore,
+        mood,
+        confidence,
+        headlineCount: count
+    };
+};
+
 const readTag = (input, tagName) => {
     const regex = new RegExp(`<${tagName}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tagName}>`, 'i');
     const match = input.match(regex);
@@ -44,12 +125,17 @@ const parseRssNewsItems = (xml) => {
         const source = decodeEntities(readTag(itemXml, 'source')) || 'Market News';
         const pubDateRaw = readTag(itemXml, 'pubDate');
         const parsedDate = new Date(pubDateRaw);
+        const analysis = analyzeHeadline(title);
 
         return {
             title,
             url,
             source,
-            publishedAt: Number.isNaN(parsedDate.getTime()) ? null : parsedDate.toISOString()
+            publishedAt: Number.isNaN(parsedDate.getTime()) ? null : parsedDate.toISOString(),
+            sentimentScore: analysis.sentimentScore,
+            riskScore: analysis.riskScore,
+            sentimentLabel: analysis.sentimentLabel,
+            impactLabel: analysis.impactLabel
         };
     }).filter((item) => item.title && item.url);
 };
@@ -113,6 +199,7 @@ app.get('/market-news', async (req, res) => {
             source: 'Google News RSS',
             symbol: data.symbol,
             updatedAt: new Date(data.fetchedAt).toISOString(),
+            mood: summarizeMood(data.items),
             items: data.items
         });
     } catch (error) {

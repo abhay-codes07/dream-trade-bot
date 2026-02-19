@@ -20,6 +20,16 @@
         .news-filter { padding: 0 15px 8px; display: flex; gap: 8px; align-items: center; }
         #news-symbol-input { flex: 1; background: #1e222d; color: #d1d4dc; border: 1px solid #363c4e; border-radius: 5px; padding: 6px 8px; font-size: 11px; }
         #news-filter-btn { background: #2962ff; color: white; border: none; border-radius: 5px; padding: 6px 10px; font-size: 11px; cursor: pointer; }
+        .mood-card { margin: 0 15px 10px; background: #1e222d; border: 1px solid #363c4e; border-radius: 7px; padding: 10px; }
+        .mood-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .mood-title { font-size: 10px; color: #787b86; letter-spacing: 0.5px; }
+        #mood-label { font-size: 11px; font-weight: 700; color: #d1d4dc; text-transform: uppercase; }
+        .mood-bar-shell { height: 8px; background: #141923; border-radius: 99px; overflow: hidden; margin-bottom: 8px; }
+        #mood-bar-fill { width: 50%; height: 100%; background: linear-gradient(90deg, #f23645, #f7b955, #22ab94); transition: width 0.35s ease; }
+        .mood-metrics { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; font-size: 10px; }
+        .mood-metric { background: #141923; border: 1px solid #2b3040; border-radius: 6px; padding: 6px; text-align: center; }
+        .mood-metric-value { display: block; color: #ffffff; font-size: 11px; font-weight: 700; margin-top: 2px; }
+        .impact-pill { font-size: 9px; border-radius: 20px; padding: 2px 7px; border: 1px solid transparent; text-transform: uppercase; letter-spacing: 0.4px; }
     </style>
 </head>
 <body>
@@ -54,6 +64,20 @@
         <input id="news-symbol-input" type="text" placeholder="Ticker (e.g. TSLA)">
         <button id="news-filter-btn">Filter</button>
     </div>
+    <div class="mood-card">
+        <div class="mood-top">
+            <span class="mood-title">MARKET MOOD</span>
+            <span id="mood-label">NEUTRAL</span>
+        </div>
+        <div class="mood-bar-shell">
+            <div id="mood-bar-fill"></div>
+        </div>
+        <div class="mood-metrics">
+            <div class="mood-metric">Sentiment<span id="mood-sentiment" class="mood-metric-value">0</span></div>
+            <div class="mood-metric">Risk<span id="mood-risk" class="mood-metric-value">0</span></div>
+            <div class="mood-metric">Confidence<span id="mood-confidence" class="mood-metric-value">0%</span></div>
+        </div>
+    </div>
     <div id="news-status">Connecting to feed...</div>
     <div class="news-container">
         <div id="news-list"></div>
@@ -68,6 +92,34 @@
             const parsed = new Date(isoString);
             if (Number.isNaN(parsed.getTime())) return 'Unknown time';
             return parsed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        };
+
+        const sentimentColor = (label) => {
+            if (label === 'bullish') return '#22ab94';
+            if (label === 'bearish') return '#f23645';
+            return '#7a808f';
+        };
+
+        const impactPillStyle = (impact) => {
+            if (impact === 'high') return 'color:#f7b6bc;border-color:#f23645;background:rgba(242,54,69,0.16);';
+            if (impact === 'medium') return 'color:#ffd28c;border-color:#ffb74d;background:rgba(255,183,77,0.12);';
+            return 'color:#9dc9ff;border-color:#2962ff;background:rgba(41,98,255,0.10);';
+        };
+
+        const updateMoodCard = (moodData) => {
+            const mood = moodData || {};
+            const score = Number(mood.sentimentScore) || 0;
+            const normalized = Math.max(0, Math.min(100, Math.round((score + 100) / 2)));
+            const label = (mood.mood || 'neutral').toUpperCase();
+            const risk = Math.round(Number(mood.riskScore) || 0);
+            const confidence = Math.round(Number(mood.confidence) || 0);
+
+            document.getElementById('mood-label').innerText = label;
+            document.getElementById('mood-label').style.color = sentimentColor(mood.mood);
+            document.getElementById('mood-bar-fill').style.width = `${normalized}%`;
+            document.getElementById('mood-sentiment').innerText = score.toFixed(1);
+            document.getElementById('mood-risk').innerText = `${risk}`;
+            document.getElementById('mood-confidence').innerText = `${confidence}%`;
         };
 
         async function fetchUpdates() {
@@ -105,6 +157,7 @@
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
                 const data = await response.json();
+                updateMoodCard(data.mood);
                 const items = Array.isArray(data.items) ? data.items.slice(0, 8) : [];
                 newsList.innerHTML = '';
 
@@ -117,11 +170,15 @@
                         card.href = item.url;
                         card.target = '_blank';
                         card.rel = 'noopener noreferrer';
+                        card.style.borderLeft = `3px solid ${sentimentColor(item.sentimentLabel)}`;
                         card.innerHTML = `
                             <div class="news-title">${item.title}</div>
                             <div class="news-meta">
                                 <span>${item.source || 'Market News'}</span>
                                 <span>${formatNewsTime(item.publishedAt)}</span>
+                            </div>
+                            <div style="margin-top:6px;">
+                                <span class="impact-pill" style="${impactPillStyle(item.impactLabel)}">${item.impactLabel || 'low'} impact</span>
                             </div>
                         `;
                         newsList.appendChild(card);

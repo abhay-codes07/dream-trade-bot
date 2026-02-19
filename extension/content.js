@@ -307,6 +307,35 @@ const formatNewsAge = (isoDate) => {
     return `${Math.floor(minutesAgo / 60)}h`;
 };
 
+const getSentimentColor = (label) => {
+    if (label === 'bullish') return '#22ab94';
+    if (label === 'bearish') return '#f23645';
+    return '#7a808f';
+};
+
+const getImpactStyle = (impactLabel) => {
+    if (impactLabel === 'high') return 'color:#f7b6bc;border-color:#f23645;background:rgba(242,54,69,0.16);';
+    if (impactLabel === 'medium') return 'color:#ffd28c;border-color:#ffb74d;background:rgba(255,183,77,0.12);';
+    return 'color:#9dc9ff;border-color:#2962ff;background:rgba(41,98,255,0.10);';
+};
+
+const updatePanelMood = (moodPayload, symbol) => {
+    const moodNode = document.getElementById('dt-mood-label');
+    const sentimentNode = document.getElementById('dt-mood-sentiment');
+    const riskNode = document.getElementById('dt-mood-risk');
+    if (!moodNode || !sentimentNode || !riskNode) return;
+
+    const mood = moodPayload || {};
+    const moodText = (mood.mood || 'neutral').toUpperCase();
+    const sentimentScore = Number(mood.sentimentScore) || 0;
+    const riskScore = Math.round(Number(mood.riskScore) || 0);
+
+    moodNode.innerText = symbol ? `${moodText} (${symbol})` : moodText;
+    moodNode.style.color = getSentimentColor(mood.mood);
+    sentimentNode.innerText = sentimentScore.toFixed(1);
+    riskNode.innerText = `${riskScore}`;
+};
+
 const refreshPanelNews = async () => {
     const listNode = document.getElementById('dt-news-list');
     const statusNode = document.getElementById('dt-news-status');
@@ -321,6 +350,7 @@ const refreshPanelNews = async () => {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const payload = await response.json();
+        updatePanelMood(payload.mood, symbol);
         const items = Array.isArray(payload.items) ? payload.items.slice(0, 4) : [];
         listNode.innerHTML = '';
 
@@ -332,10 +362,13 @@ const refreshPanelNews = async () => {
                 row.href = item.url;
                 row.target = '_blank';
                 row.rel = 'noopener noreferrer';
-                row.style = 'display:block; text-decoration:none; color:#d1d4dc; font-size:10px; line-height:1.35; background:#1a1f2b; border:1px solid #363c4e; border-radius:5px; padding:6px; margin-bottom:6px;';
+                row.style = `display:block; text-decoration:none; color:#d1d4dc; font-size:10px; line-height:1.35; background:#1a1f2b; border:1px solid #363c4e; border-left:3px solid ${getSentimentColor(item.sentimentLabel)}; border-radius:5px; padding:6px; margin-bottom:6px;`;
                 row.innerHTML = `
                     <div style="margin-bottom:3px;">${item.title}</div>
                     <div style="color:#787b86;">${item.source || 'Market'} - ${formatNewsAge(item.publishedAt)}</div>
+                    <div style="margin-top:4px;">
+                        <span style="font-size:9px; border:1px solid transparent; border-radius:999px; padding:1px 6px; text-transform:uppercase; ${getImpactStyle(item.impactLabel)}">${item.impactLabel || 'low'} impact</span>
+                    </div>
                 `;
                 listNode.appendChild(row);
             });
@@ -432,6 +465,20 @@ const injectPanel = () => {
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                 <div style="font-size:10px; color:#787b86;">MARKET NEWS</div>
                 <div id="dt-news-status" style="font-size:9px; color:#787b86;">Connecting...</div>
+            </div>
+            <div style="display:flex; gap:6px; margin-bottom:8px;">
+                <div style="flex:1; background:#1a1f2b; border:1px solid #363c4e; border-radius:5px; padding:6px;">
+                    <div style="font-size:9px; color:#787b86;">Mood</div>
+                    <div id="dt-mood-label" style="font-size:10px; font-weight:bold; color:#d1d4dc;">NEUTRAL</div>
+                </div>
+                <div style="width:54px; background:#1a1f2b; border:1px solid #363c4e; border-radius:5px; padding:6px; text-align:center;">
+                    <div style="font-size:9px; color:#787b86;">S</div>
+                    <div id="dt-mood-sentiment" style="font-size:10px; font-weight:bold;">0.0</div>
+                </div>
+                <div style="width:54px; background:#1a1f2b; border:1px solid #363c4e; border-radius:5px; padding:6px; text-align:center;">
+                    <div style="font-size:9px; color:#787b86;">R</div>
+                    <div id="dt-mood-risk" style="font-size:10px; font-weight:bold;">0</div>
+                </div>
             </div>
             <div id="dt-news-list"></div>
         </div>
