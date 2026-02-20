@@ -336,6 +336,41 @@ const updatePanelMood = (moodPayload, symbol) => {
     riskNode.innerText = `${riskScore}`;
 };
 
+const evaluateTradeRisk = async (symbol) => {
+    try {
+        const endpoint = symbol
+            ? `http://localhost:3000/market-news?symbol=${encodeURIComponent(symbol)}`
+            : 'http://localhost:3000/market-news';
+        const response = await fetch(endpoint);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const payload = await response.json();
+        const mood = payload.mood || {};
+        const riskScore = Number(mood.riskScore) || 0;
+        const moodLabel = (mood.mood || 'neutral').toLowerCase();
+        const highImpact = Array.isArray(payload.items)
+            ? payload.items.find((item) => item.impactLabel === 'high')
+            : null;
+
+        const shouldGuard = moodLabel === 'bearish' && riskScore >= 60;
+        if (!shouldGuard) {
+            return { allow: true, reason: '', headline: '' };
+        }
+
+        return {
+            allow: false,
+            reason: `Risk Guard: ${symbol || 'Market'} mood is bearish with risk ${Math.round(riskScore)}/100.`,
+            headline: highImpact ? highImpact.title : ''
+        };
+    } catch (error) {
+        return {
+            allow: true,
+            reason: '',
+            headline: ''
+        };
+    }
+};
+
 const refreshPanelNews = async () => {
     const listNode = document.getElementById('dt-news-list');
     const statusNode = document.getElementById('dt-news-status');
@@ -435,6 +470,10 @@ const injectPanel = () => {
             <span id="dt-status" style="color:#00ff00; font-size:10px;">LIVE</span>
         </div>
 
+        <div id="dt-risk-guard-banner" style="margin-bottom:10px; font-size:10px; color:#8ec5ff; background:#1a1f2b; border:1px solid #2c3f68; border-radius:6px; padding:6px; text-align:center;">
+            RISK GUARD ON - checks live news before buy
+        </div>
+
         <div style="margin-bottom:15px;">
             <div style="display:flex; justify-content:space-between; font-size:10px; color:#787b86; margin-bottom:5px;">
                 <span>STRATEGY CONFIDENCE</span>
@@ -501,9 +540,29 @@ const injectPanel = () => {
 
     const buyBtn = document.getElementById('dt-buy-btn');
     if (buyBtn) {
-        buyBtn.onclick = () => {
+        buyBtn.onclick = async () => {
             const symbol = extractCurrentSymbol() || document.title.split(' ')[0];
             const latestPrice = extractCurrentPrice();
+            const statusNode = document.getElementById('dt-status');
+            const guardResult = await evaluateTradeRisk(symbol);
+
+            if (!guardResult.allow) {
+                if (statusNode) {
+                    statusNode.style.color = '#f23645';
+                    statusNode.innerText = 'RISK LOCK';
+                    setTimeout(() => {
+                        statusNode.style.color = '#00ff00';
+                        statusNode.innerText = 'LIVE';
+                    }, 5000);
+                }
+
+                const warning = guardResult.headline
+                    ? `${guardResult.reason}\nTop headline: ${guardResult.headline}\n\nPress OK to FORCE BUY, Cancel to abort.`
+                    : `${guardResult.reason}\n\nPress OK to FORCE BUY, Cancel to abort.`;
+                const forceBuy = confirm(warning);
+                if (!forceBuy) return;
+            }
+
             chrome.runtime.sendMessage({
                 action: 'start_trade',
                 symbol,
@@ -511,7 +570,7 @@ const injectPanel = () => {
                 rsi: rsiIndicator.current,
                 closes: rsiIndicator.closes.slice(-100)
             });
-            alert('Buy Order Sent!');
+            alert(guardResult.allow ? 'Buy Order Sent!' : 'Risk Override: Buy Order Sent!');
         };
     }
 
