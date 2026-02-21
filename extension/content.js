@@ -17,6 +17,13 @@ const rsiIndicator = {
     sampleTimer: null
 };
 
+const priceAlert = {
+    enabled: false,
+    target: null,
+    direction: 'above',
+    watcherTimer: null
+};
+
 const findChartContainer = () => {
     const directMatch = document.querySelector(
         '.chart-container, .tv-chart-view, .chart-page, .chart-markup-table, [data-name="pane"]'
@@ -297,6 +304,66 @@ const stopRSITracking = () => {
     }
 };
 
+const updatePriceAlertStatus = (text, color = '#787b86') => {
+    const node = document.getElementById('dt-alert-status');
+    if (!node) return;
+    node.innerText = text;
+    node.style.color = color;
+};
+
+const pushPriceAlertEvent = (text, color = '#8ec5ff') => {
+    const log = document.getElementById('dt-alert-log');
+    if (!log) return;
+
+    const row = document.createElement('div');
+    row.style = `font-size:10px; color:${color}; background:#1a1f2b; border:1px solid #363c4e; border-radius:5px; padding:5px 6px; margin-top:5px;`;
+    row.innerText = text;
+    log.prepend(row);
+
+    while (log.children.length > 3) {
+        log.removeChild(log.lastChild);
+    }
+};
+
+const checkPriceAlert = () => {
+    if (!priceAlert.enabled || !Number.isFinite(priceAlert.target)) return;
+
+    const currentPrice = extractCurrentPrice();
+    if (!Number.isFinite(currentPrice)) return;
+
+    const hit = priceAlert.direction === 'above'
+        ? currentPrice >= priceAlert.target
+        : currentPrice <= priceAlert.target;
+
+    if (!hit) return;
+
+    const symbol = extractCurrentSymbol() || 'SYMBOL';
+    const statusNode = document.getElementById('dt-status');
+    const triggerText = `${symbol} ${priceAlert.direction === 'above' ? 'rose to' : 'fell to'} ${currentPrice.toFixed(2)} (target ${priceAlert.target.toFixed(2)})`;
+
+    priceAlert.enabled = false;
+    const toggleBtn = document.getElementById('dt-alert-toggle-btn');
+    if (toggleBtn) toggleBtn.innerText = 'ARM ALERT';
+
+    if (statusNode) {
+        statusNode.innerText = 'PRICE HIT';
+        statusNode.style.color = '#ffb74d';
+        setTimeout(() => {
+            statusNode.innerText = 'LIVE';
+            statusNode.style.color = '#00ff00';
+        }, 4000);
+    }
+
+    updatePriceAlertStatus('Target hit', '#ffb74d');
+    pushPriceAlertEvent(`Price Alert: ${triggerText}`, '#ffb74d');
+    alert(`Price Alert Triggered\n${triggerText}`);
+};
+
+const startPriceAlertWatcher = () => {
+    if (priceAlert.watcherTimer) clearInterval(priceAlert.watcherTimer);
+    priceAlert.watcherTimer = setInterval(checkPriceAlert, 2000);
+};
+
 const formatNewsAge = (isoDate) => {
     if (!isoDate) return 'now';
     const timestamp = new Date(isoDate).getTime();
@@ -501,6 +568,23 @@ const injectPanel = () => {
         </div>
 
         <div style="margin-top:12px; border-top:1px solid #363c4e; padding-top:10px;">
+            <div style="font-size:10px; color:#787b86; margin-bottom:8px;">SMART PRICE ALERT</div>
+            <div style="display:flex; gap:6px; margin-bottom:6px;">
+                <input id="dt-alert-target" type="text" placeholder="Target price" style="flex:1; background:#1a1f2b; color:#d1d4dc; border:1px solid #363c4e; border-radius:5px; padding:6px; font-size:10px;">
+                <select id="dt-alert-direction" style="width:72px; background:#1a1f2b; color:#d1d4dc; border:1px solid #363c4e; border-radius:5px; font-size:10px;">
+                    <option value="above">ABOVE</option>
+                    <option value="below">BELOW</option>
+                </select>
+            </div>
+            <div style="display:flex; gap:6px; margin-bottom:6px;">
+                <button id="dt-alert-toggle-btn" style="flex:1; background:#1e222d; color:#8ec5ff; border:1px solid #2962ff; padding:7px; border-radius:6px; font-size:10px; cursor:pointer; font-weight:bold;">ARM ALERT</button>
+                <button id="dt-alert-clear-btn" style="width:84px; background:transparent; color:#d1d4dc; border:1px solid #555d70; padding:7px; border-radius:6px; font-size:10px; cursor:pointer;">CLEAR LOG</button>
+            </div>
+            <div id="dt-alert-status" style="font-size:9px; color:#787b86; margin-bottom:6px;">No active alert</div>
+            <div id="dt-alert-log"></div>
+        </div>
+
+        <div style="margin-top:12px; border-top:1px solid #363c4e; padding-top:10px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                 <div style="font-size:10px; color:#787b86;">MARKET NEWS</div>
                 <div id="dt-news-status" style="font-size:9px; color:#787b86;">Connecting...</div>
@@ -525,6 +609,7 @@ const injectPanel = () => {
     document.body.appendChild(panel);
     resizeTrendCanvas();
     resizeRSICanvas();
+    startPriceAlertWatcher();
     refreshPanelNews();
     setInterval(refreshPanelNews, 20000);
 
@@ -625,6 +710,45 @@ const injectPanel = () => {
             rsiIndicator.closes = [];
             rsiIndicator.current = null;
             drawRSIOverlay();
+        };
+    }
+
+    const alertToggleBtn = document.getElementById('dt-alert-toggle-btn');
+    const alertTargetInput = document.getElementById('dt-alert-target');
+    const alertDirectionInput = document.getElementById('dt-alert-direction');
+    const alertClearBtn = document.getElementById('dt-alert-clear-btn');
+
+    if (alertToggleBtn && alertTargetInput && alertDirectionInput) {
+        alertToggleBtn.onclick = () => {
+            if (priceAlert.enabled) {
+                priceAlert.enabled = false;
+                alertToggleBtn.innerText = 'ARM ALERT';
+                updatePriceAlertStatus('Alert disarmed', '#787b86');
+                return;
+            }
+
+            const parsedTarget = Number((alertTargetInput.value || '').replace(/[^0-9.-]/g, ''));
+            if (!Number.isFinite(parsedTarget) || parsedTarget <= 0) {
+                updatePriceAlertStatus('Enter a valid target', '#f23645');
+                return;
+            }
+
+            priceAlert.target = parsedTarget;
+            priceAlert.direction = alertDirectionInput.value === 'below' ? 'below' : 'above';
+            priceAlert.enabled = true;
+            alertToggleBtn.innerText = 'DISARM ALERT';
+            updatePriceAlertStatus(
+                `Armed: ${priceAlert.direction.toUpperCase()} ${priceAlert.target.toFixed(2)}`,
+                '#8ec5ff'
+            );
+            pushPriceAlertEvent(`Armed ${priceAlert.direction.toUpperCase()} ${priceAlert.target.toFixed(2)}`);
+        };
+    }
+
+    if (alertClearBtn) {
+        alertClearBtn.onclick = () => {
+            const log = document.getElementById('dt-alert-log');
+            if (log) log.innerHTML = '';
         };
     }
 };
