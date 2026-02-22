@@ -17,6 +17,14 @@ const rsiIndicator = {
     sampleTimer: null
 };
 
+const momentumMeter = {
+    windowSize: 12,
+    values: [],
+    label: 'NEUTRAL',
+    strength: 0,
+    volatility: 0
+};
+
 const priceAlert = {
     enabled: false,
     target: null,
@@ -107,6 +115,66 @@ const calculateRSI = (closes, period = 14) => {
     if (avgLoss === 0) return 100;
     const rs = avgGain / avgLoss;
     return Number((100 - (100 / (1 + rs))).toFixed(2));
+};
+
+const calculateMomentum = (values) => {
+    if (!Array.isArray(values) || values.length < 3) {
+        return { label: 'NEUTRAL', strength: 0, volatility: 0 };
+    }
+
+    const first = values[0];
+    const last = values[values.length - 1];
+    if (!Number.isFinite(first) || !Number.isFinite(last) || first === 0) {
+        return { label: 'NEUTRAL', strength: 0, volatility: 0 };
+    }
+
+    const momentum = (last - first) / first;
+    const returns = [];
+    for (let i = 1; i < values.length; i += 1) {
+        const prev = values[i - 1];
+        const curr = values[i];
+        if (!Number.isFinite(prev) || prev === 0 || !Number.isFinite(curr)) continue;
+        returns.push((curr - prev) / prev);
+    }
+
+    let volatility = 0;
+    if (returns.length) {
+        const mean = returns.reduce((sum, val) => sum + val, 0) / returns.length;
+        const variance = returns.reduce((sum, val) => sum + (val - mean) ** 2, 0) / returns.length;
+        volatility = Math.sqrt(variance);
+    }
+
+    const absMomentum = Math.abs(momentum);
+    const strength = Math.min(100, Math.round(absMomentum * 10000));
+
+    let label = 'NEUTRAL';
+    if (momentum >= 0.006) label = 'STRONG BULL';
+    else if (momentum >= 0.002) label = 'BULLISH';
+    else if (momentum <= -0.006) label = 'STRONG BEAR';
+    else if (momentum <= -0.002) label = 'BEARISH';
+
+    return { label, strength, volatility };
+};
+
+const updateMomentumUI = () => {
+    const labelNode = document.getElementById('dt-momentum-label');
+    const valueNode = document.getElementById('dt-momentum-value');
+    const volNode = document.getElementById('dt-momentum-vol');
+    const barNode = document.getElementById('dt-momentum-bar');
+    if (!labelNode || !valueNode || !volNode || !barNode) return;
+
+    labelNode.innerText = momentumMeter.label;
+    valueNode.innerText = `${momentumMeter.strength}%`;
+    volNode.innerText = `Vol ${momentumMeter.volatility.toFixed(3)}`;
+
+    const color = momentumMeter.label.includes('BULL') ? '#22ab94'
+        : momentumMeter.label.includes('BEAR') ? '#f23645'
+            : '#7a808f';
+
+    labelNode.style.color = color;
+    barNode.style.width = `${Math.max(4, momentumMeter.strength)}%`;
+    barNode.style.background = `linear-gradient(90deg, ${color}, rgba(255,255,255,0.2))`;
+    barNode.style.boxShadow = `0 0 10px ${color}55`;
 };
 
 const ensureTrendCanvas = () => {
@@ -289,6 +357,16 @@ const sampleRSIPrice = () => {
         rsiIndicator.closes.shift();
     }
     drawRSIOverlay();
+
+    momentumMeter.values.push(price);
+    if (momentumMeter.values.length > momentumMeter.windowSize) {
+        momentumMeter.values.shift();
+    }
+    const momentumState = calculateMomentum(momentumMeter.values);
+    momentumMeter.label = momentumState.label;
+    momentumMeter.strength = momentumState.strength;
+    momentumMeter.volatility = momentumState.volatility;
+    updateMomentumUI();
 };
 
 const startRSITracking = () => {
@@ -568,6 +646,20 @@ const injectPanel = () => {
         </div>
 
         <div style="margin-top:12px; border-top:1px solid #363c4e; padding-top:10px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <div style="font-size:10px; color:#787b86;">MOMENTUM METER</div>
+                <div id="dt-momentum-vol" style="font-size:9px; color:#787b86;">Vol 0.000</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                <div id="dt-momentum-label" style="font-size:11px; font-weight:bold; color:#7a808f;">NEUTRAL</div>
+                <div id="dt-momentum-value" style="font-size:10px; color:#d1d4dc;">0%</div>
+            </div>
+            <div style="width:100%; height:6px; background:#1a1f2b; border:1px solid #363c4e; border-radius:999px; overflow:hidden;">
+                <div id="dt-momentum-bar" style="width:4%; height:100%; background:linear-gradient(90deg, #7a808f, rgba(255,255,255,0.2)); transition:width 0.4s ease;"></div>
+            </div>
+        </div>
+
+        <div style="margin-top:12px; border-top:1px solid #363c4e; padding-top:10px;">
             <div style="font-size:10px; color:#787b86; margin-bottom:8px;">SMART PRICE ALERT</div>
             <div style="display:flex; gap:6px; margin-bottom:6px;">
                 <input id="dt-alert-target" type="text" placeholder="Target price" style="flex:1; background:#1a1f2b; color:#d1d4dc; border:1px solid #363c4e; border-radius:5px; padding:6px; font-size:10px;">
@@ -710,6 +802,11 @@ const injectPanel = () => {
             rsiIndicator.closes = [];
             rsiIndicator.current = null;
             drawRSIOverlay();
+            momentumMeter.values = [];
+            momentumMeter.label = 'NEUTRAL';
+            momentumMeter.strength = 0;
+            momentumMeter.volatility = 0;
+            updateMomentumUI();
         };
     }
 
