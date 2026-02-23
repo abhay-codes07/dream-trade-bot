@@ -25,6 +25,11 @@ const momentumMeter = {
     volatility: 0
 };
 
+const focusMode = {
+    enabled: false,
+    overlay: null
+};
+
 const priceAlert = {
     enabled: false,
     target: null,
@@ -175,6 +180,33 @@ const updateMomentumUI = () => {
     barNode.style.width = `${Math.max(4, momentumMeter.strength)}%`;
     barNode.style.background = `linear-gradient(90deg, ${color}, rgba(255,255,255,0.2))`;
     barNode.style.boxShadow = `0 0 10px ${color}55`;
+};
+
+const ensureFocusOverlay = () => {
+    if (focusMode.overlay) return focusMode.overlay;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'dt-focus-overlay';
+    overlay.style.position = 'fixed';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100vw';
+    overlay.style.height = '100vh';
+    overlay.style.background = 'rgba(6, 10, 20, 0.4)';
+    overlay.style.backdropFilter = 'blur(1px)';
+    overlay.style.pointerEvents = 'none';
+    overlay.style.zIndex = '9999996';
+    overlay.style.opacity = '0';
+    overlay.style.transition = 'opacity 0.25s ease';
+    document.body.appendChild(overlay);
+
+    focusMode.overlay = overlay;
+    return overlay;
+};
+
+const updateFocusOverlay = () => {
+    const overlay = ensureFocusOverlay();
+    overlay.style.opacity = focusMode.enabled ? '1' : '0';
 };
 
 const ensureTrendCanvas = () => {
@@ -601,6 +633,11 @@ window.addEventListener('scroll', () => {
     drawRSIOverlay();
 }, true);
 document.addEventListener('click', handleChartHighClick, true);
+document.addEventListener('keydown', (event) => {
+    if (!event.shiftKey || event.key.toLowerCase() !== 'f') return;
+    const toggleBtn = document.getElementById('dt-focus-toggle-btn');
+    if (toggleBtn) toggleBtn.click();
+});
 
 const injectPanel = () => {
     if (document.getElementById('dt-pro-panel')) return;
@@ -657,6 +694,11 @@ const injectPanel = () => {
             <div style="width:100%; height:6px; background:#1a1f2b; border:1px solid #363c4e; border-radius:999px; overflow:hidden;">
                 <div id="dt-momentum-bar" style="width:4%; height:100%; background:linear-gradient(90deg, #7a808f, rgba(255,255,255,0.2)); transition:width 0.4s ease;"></div>
             </div>
+        </div>
+
+        <div style="margin-top:12px; border-top:1px solid #363c4e; padding-top:10px;">
+            <div style="font-size:10px; color:#787b86; margin-bottom:8px;">FOCUS MODE</div>
+            <button id="dt-focus-toggle-btn" style="width:100%; background:#1e222d; color:#8ec5ff; border:1px solid #2962ff; padding:8px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:bold;">ENABLE FOCUS (SHIFT+F)</button>
         </div>
 
         <div style="margin-top:12px; border-top:1px solid #363c4e; padding-top:10px;">
@@ -807,6 +849,17 @@ const injectPanel = () => {
             momentumMeter.strength = 0;
             momentumMeter.volatility = 0;
             updateMomentumUI();
+        };
+    }
+
+    const focusToggleBtn = document.getElementById('dt-focus-toggle-btn');
+    if (focusToggleBtn) {
+        focusToggleBtn.onclick = () => {
+            focusMode.enabled = !focusMode.enabled;
+            focusToggleBtn.innerText = focusMode.enabled
+                ? 'DISABLE FOCUS (SHIFT+F)'
+                : 'ENABLE FOCUS (SHIFT+F)';
+            updateFocusOverlay();
         };
     }
 
